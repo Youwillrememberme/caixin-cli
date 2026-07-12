@@ -25,6 +25,7 @@ _DATE = re.compile(r"/(\d{4}-\d{2}-\d{2})/")
 
 # channel key -> (Chinese label, homepage URL)
 CHANNELS: dict[str, tuple[str, str]] = {
+    "home": ("首页", "https://www.caixin.com/"),
     "economy": ("经济", "https://economy.caixin.com/"),
     "finance": ("金融", "https://finance.caixin.com/"),
     "companies": ("公司", "https://companies.caixin.com/"),
