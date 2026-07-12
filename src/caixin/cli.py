@@ -14,7 +14,7 @@ from .browser import BrowserRenderer
 from .client import CaixinClient, CaixinError
 from .config import Settings, load_settings
 from .parsers.article import fetch_article
-from .parsers.channel import list_channels, parse_channel_articles, resolve_channel
+from .parsers.channel import list_channel_articles, list_channels, resolve_channel
 from .parsers.search import search_caixin
 from .parsers.weekly import (
     parse_issue_articles,
@@ -322,16 +322,15 @@ def channel(
 
     client = _make_client(settings)
     try:
-        html = client.get_html(url)
-        articles = parse_channel_articles(html)
+        articles, paginated = list_channel_articles(client, url, limit=limit)
     except CaixinError as e:
         console.print(f"[red]错误：{e}[/red]"); _cleanup(client, None); raise typer.Exit(1)
 
     if not articles:
         console.print(f"[red]在 {label} 频道未找到文章。[/red]"); _cleanup(client, None); raise typer.Exit(1)
 
-    articles = articles[:limit]
-    console.print(f"[cyan]频道：[/cyan]{label}（{key}）  {url}  共 {len(articles)} 篇")
+    note = "[dim]（AJAX 翻页，可加载更多历史）[/dim]" if paginated else "[dim]（仅首页文章，无翻页）[/dim]"
+    console.print(f"[cyan]频道：[/cyan]{label}（{key}）  {url}  共 {len(articles)} 篇 {note}")
     _print_channel_table(articles)
 
     if not fetch:

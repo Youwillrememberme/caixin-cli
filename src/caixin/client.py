@@ -9,6 +9,8 @@ index, search) which work fine over plain HTTP.
 """
 from __future__ import annotations
 
+import json
+import re
 import time
 from typing import Optional
 
@@ -86,3 +88,21 @@ class CaixinClient:
         if r.status_code >= 400:
             raise CaixinError(f"HTTP {r.status_code} fetching {url}")
         return r.content
+
+    def get_jsonp(self, url: str, params: dict | None = None, callback: str = "cb") -> dict:
+        """Fetch a JSONP endpoint and return the parsed JSON object.
+
+        The response is expected to be ``<callback>({...})`` (with possible
+        leading whitespace). Returns the parsed ``{...}`` dict.
+        """
+        r = self._get(url, params=params, extra_headers={
+            "Referer": "https://www.caixin.com/", "Accept": "*/*"})
+        if r.status_code >= 400:
+            raise CaixinError(f"HTTP {r.status_code} fetching {url}")
+        text = r.content.decode("utf-8", errors="replace").strip()
+        m = re.search(re.escape(callback) + r"\(\s*(\{.*\})\s*\)\s*;?\s*$", text, re.S)
+        if not m:  # callback-agnostic fallback
+            m = re.search(r"\(\s*(\{.*\})\s*\)\s*;?\s*$", text, re.S)
+        if not m:
+            raise CaixinError("could not parse JSONP response")
+        return json.loads(m.group(1))

@@ -16,12 +16,18 @@ from typing import Optional
 
 from bs4 import BeautifulSoup, Tag
 
-from ..client import CaixinError
+from ..client import CaixinClient, CaixinError
 from ..models import ChannelArticle
 
 _ART = re.compile(r"https?://[\w-]+\.caixin\.com/(?:m/)?\d{4}-\d{2}-\d{2}/\d+\.html")
 _COMMENT = re.compile(r"^评论\s*\(\s*\d+\s*\)")
 _DATE = re.compile(r"/(\d{4}-\d{2}-\d{2})/")
+_LOADMORE = re.compile(r"loadMoreNews\w*\(\s*\d+\s*,\s*(\d+)\s*,\s*\d+\s*,\s*(\d+)\s*\)")
+
+# AJAX "load more" endpoint (subdomain channels only). Discovered from
+# channel.js: loadMoreNewses(t, channelId, pageIdx, count) calls
+# gateway.caixin.com/api/extapi/homeInterface.jsp?channel=<id>&start=<p*count>&count=<count>
+_HOME_API = "https://gateway.caixin.com/api/extapi/homeInterface.jsp"
 
 # channel key -> (Chinese label, homepage URL)
 CHANNELS: dict[str, tuple[str, str]] = {
@@ -102,3 +108,63 @@ def _title_of(a: Tag, url: str) -> str:
                     return t
         p = p.parent
     return ""
+
+
+def extract_loadmore(html: str) -> Optional[tuple[int, int]]:
+    """Extract (channel_id, count) from a `loadMoreNewses(0,id,1,count)` call.
+
+    Subdomain channel pages embed this call to drive their AJAX "load more";
+    path-based channels and the homepage do not, so this returns None for them.
+    """
+    m = _LOADMORE.search(html)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def _fetch_page(client: CaixinClient, channel_id: int, start: int, count: int) -> tuple[list[ChannelArticle], int]:
+    """Fetch one AJAX page of articles; return (articles, maxes)."""
+    obj = client.get_jsonp(_HOME_API, params={
+        "channel": channel_id, "start": start, "count": count,
+        "picdim": "_145_97", "callback": "cb",
+    })
+    maxes = int(obj.get("maxes") or 0)
+    arts: list[ChannelArticle] = []
+    for d in obj.get("datas") or []:
+        link = (d.get("link") or "").strip()
+        title = (d.get("desc") or d.get("summ") or "").strip()
+        time = (d.get("time") or "").strip()
+        date = time[:10] if time else ""
+        if not date:
+            dm = _DATE.search(link)
+            date = dm.group(1) if dm else ""
+        if link and title:
+            arts.append(ChannelArticle(date=date, title=title, url=link))
+    return arts, maxes
+
+
+def list_channel_articles(client: CaixinClient, channel_url: str, limit: int = 20) -> tuple[list[ChannelArticle], bool]:
+    """List recent articles for a channel, paginating via AJAX when supported.
+
+    Returns (articles, paginated). Subdomain channels paginate through the
+    gateway "load more" API (up to ~1000 articles); path-based channels and the
+    homepage fall back to the single page's HTML articles (no pagination).
+    """
+    html = client.get_html(channel_url)
+    lm = extract_loadmore(html)
+    if lm:
+        channel_id, count = lm
+        arts: list[ChannelArticle] = []
+        start = 0
+        maxes = 1  # enter loop; set by first page
+        while len(arts) < limit:
+            page_arts, maxes = _fetch_page(client, channel_id, start, count)
+            if not page_arts:
+                break
+            arts.extend(page_arts)
+            start += count
+            if maxes and start >= maxes:
+                break
+        return arts[:limit], True
+    # fallback: parse the single page's HTML
+    return parse_channel_articles(html)[:limit], False
