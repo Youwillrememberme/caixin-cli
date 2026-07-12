@@ -57,3 +57,13 @@ class SearchResult:
     title: str
     url: str
     snippet: str = ""
+
+
+@dataclass
+class ChannelArticle:
+    """A recent article listed on a channel (板块) homepage."""
+
+    date: str  # YYYY-MM-DD (from the URL)
+    title: str
+    url: str
+

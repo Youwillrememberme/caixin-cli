@@ -14,6 +14,7 @@ from .browser import BrowserRenderer
 from .client import CaixinClient, CaixinError
 from .config import Settings, load_settings
 from .parsers.article import fetch_article
+from .parsers.channel import list_channels, parse_channel_articles, resolve_channel
 from .parsers.search import search_caixin
 from .parsers.weekly import (
     parse_issue_articles,
@@ -300,6 +301,60 @@ def search(
         console.print(f"\n[green]完成[/green] 成功 {ok} / 失败 {fail}  ->  {out_dir}")
 
 
+@app.command()
+def channel(
+    ctx: typer.Context,
+    name: Optional[str] = typer.Argument(None, help="频道名（economy/finance/...），或 list 列出全部"),
+    fetch: bool = typer.Option(False, "--fetch", help="下载文章而非仅列出"),
+    limit: int = typer.Option(20, "--limit", "-n", help="最多篇数"),
+    no_images: bool = typer.Option(False, "--no-images"),
+):
+    """列出/抓取某频道（板块）的最新文章。"""
+    settings: Settings = ctx.obj
+    if not name or name.lower() == "list":
+        _print_channels()
+        return
+
+    try:
+        key, label, url = resolve_channel(name)
+    except CaixinError as e:
+        console.print(f"[red]错误：{e}[/red]"); raise typer.Exit(1)
+
+    client = _make_client(settings)
+    try:
+        html = client.get_html(url)
+        articles = parse_channel_articles(html)
+    except CaixinError as e:
+        console.print(f"[red]错误：{e}[/red]"); _cleanup(client, None); raise typer.Exit(1)
+
+    if not articles:
+        console.print(f"[red]在 {label} 频道未找到文章。[/red]"); _cleanup(client, None); raise typer.Exit(1)
+
+    articles = articles[:limit]
+    console.print(f"[cyan]频道：[/cyan]{label}（{key}）  {url}  共 {len(articles)} 篇")
+    _print_channel_table(articles)
+
+    if not fetch:
+        _cleanup(client, None)
+        return
+
+    out_dir = settings.output_dir / "channel" / key
+    renderer = _make_renderer(settings)
+    ok = fail = 0
+    try:
+        for i, art in enumerate(articles, 1):
+            ok_, msg = _save_one(client, renderer, art.url, out_dir, download_imgs=not no_images)
+            mark = "[green]✓[/green]" if ok_ else "[red]✗[/red]"
+            line = f"{mark} [{i}/{len(articles)}] {art.title}"
+            if not ok_:
+                line += f"  {msg}"
+            console.print(line)
+            ok += int(ok_); fail += int(not ok_)
+    finally:
+        _cleanup(client, renderer)
+    console.print(f"\n[green]完成[/green] 成功 {ok} / 失败 {fail}  ->  {out_dir}")
+
+
 # -- helpers ------------------------------------------------------------------
 
 def _coerce_url(s: str) -> str:
@@ -324,6 +379,27 @@ def _print_article_table(articles) -> None:
     table.add_column("标题")
     for i, a in enumerate(articles, 1):
         table.add_row(str(i), a.section or "-", a.title)
+    console.print(table)
+
+
+def _print_channels() -> None:
+    table = Table(title="可用频道（板块）")
+    table.add_column("名称", style="cyan")
+    table.add_column("栏目")
+    table.add_column("URL", overflow="fold")
+    for key, label, url in list_channels():
+        table.add_row(key, label, url)
+    console.print(table)
+    console.print("[dim]用法：caixin channel <名称>  |  caixin channel <名称> --fetch[/dim]")
+
+
+def _print_channel_table(articles) -> None:
+    table = Table(title=f"频道文章  ({len(articles)} 篇)")
+    table.add_column("日期", style="green")
+    table.add_column("标题")
+    table.add_column("URL", overflow="fold")
+    for a in articles:
+        table.add_row(a.date, a.title, a.url)
     console.print(table)
 
 

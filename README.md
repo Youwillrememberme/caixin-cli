@@ -17,6 +17,7 @@
 - `caixin latest` - 抓取（或仅列出）最新一期
 - `caixin weekly-list` - 列出往期（总期号 / 年度期号 / 出版日期 / 封面标题）
 - `caixin search <关键词>` - 搜索财新文章（经搜狗 `site:caixin.com`）；`--fetch` 搜到即下载
+- `caixin channel <频道>` - 列出/抓取某频道（板块）最新文章（经济/金融/公司/政经/世界/观点/科技/…）
 - 付费全文经 **登录 Cookie + 无头浏览器（Edge/Chrome）** 渲染获取
 - 输出 Markdown：YAML 元信息 + 正文 + 本地下载的配图
 
@@ -85,6 +86,12 @@ caixin search "AI 芯片" --limit 10
 caixin search "锂电" --fetch            # 搜到即下载
 ```
 
+# 频道（板块）
+caixin channel list                  # 列出所有频道
+caixin channel economy --limit 20    # 列出经济频道最新文章
+caixin channel finance --fetch        # 抓取金融频道最新文章
+```
+
 ### 常用选项
 
 | 选项 | 作用 |
@@ -128,9 +135,8 @@ caixin-downloads/
 
 ## 下一阶段路线图
 
-- **按板块/频道列出文章**：新增 `caixin channel` 命令，列出某频道最新文章并支持 `--list` / `--fetch`。计划频道：
-  - 经济 `economy`、金融 `finance`、公司 `companies`、政经 `china`、世界 `international`、观点 `opinion`
-  - 科技 `tech`、地产 `property`、汽车 `auto`、消费 `consumer`、能源 `energy`、健康 `health`、环科 `science`、ESG 等
+- ✅ **按板块/频道列出文章**（已完成）：`caixin channel <频道>` 列出/抓取某频道最新文章，支持 18 个频道
+  （经济/金融/公司/政经/世界/观点/环科/科技/地产/汽车/消费/能源/健康/民生/ESG/数字说/中国改革/比较）。
 - 单篇导出 HTML / PDF
 - 更新检测（自上次抓取后新增的文章）
 - 配置化默认频道与输出模板

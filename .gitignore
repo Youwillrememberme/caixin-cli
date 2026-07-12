@@ -16,7 +16,7 @@ cookie.txt
 cookies.txt
 
 # Dev / scratch
-_dbg*.py
+_*.py
 _*.txt
 .plan/
 
