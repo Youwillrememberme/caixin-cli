@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# Secrets & tool output (never commit cookies or fetched content)
+caixin-downloads/
+cookie.txt
+*.cookie
+cookies.txt
+
+# Dev / scratch
+_dbg*.py
+_*.txt
+.plan/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Claude Code local
+.claude/
