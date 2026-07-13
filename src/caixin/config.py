@@ -18,6 +18,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib  # type: ignore
 
+try:
+    import tomli_w  # for writing config back
+except ModuleNotFoundError:  # pragma: no cover
+    tomli_w = None  # type: ignore
+
 DEFAULT_CONFIG_DIR = pathlib.Path.home() / ".caixin"
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "config.toml"
 
@@ -121,3 +126,29 @@ def cookie_jar_from_header(cookie_header: str) -> dict:
         k, _, v = part.partition("=")
         jar[k.strip()] = v.strip()
     return jar
+
+
+def save_cookie_to_config(path: pathlib.Path, cookie: str) -> pathlib.Path:
+    """Persist the login cookie into the config file (creates it if absent).
+
+    Reads any existing config, sets ``[auth].cookie``, and writes back
+    atomically (``.tmp`` + rename), preserving all other fields. Requires
+    ``tomli-w``.
+    """
+    if tomli_w is None:  # pragma: no cover
+        raise RuntimeError(
+            "tomli-w is not installed (needed to write config). "
+            "Run `pip install tomli-w`."
+        )
+    path = pathlib.Path(path)
+    cfg = _read_config_file(path) if path.is_file() else {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    auth = cfg.setdefault("auth", {})
+    auth["cookie"] = cookie
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "wb") as f:
+        tomli_w.dump(cfg, f)
+    tmp.replace(path)
+    return path

@@ -20,6 +20,7 @@ dependencies = [
     "rich>=13.0",
     "python-slugify>=8.0",
     "playwright>=1.40",
+    "tomli-w>=2.0",
 ]
 
 [project.optional-dependencies]

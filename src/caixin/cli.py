@@ -10,9 +10,10 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from .auth import LoginError, login_with_qrcode
 from .browser import BrowserRenderer
 from .client import CaixinClient, CaixinError
-from .config import Settings, load_settings
+from .config import DEFAULT_CONFIG_FILE, Settings, load_settings, save_cookie_to_config
 from .parsers.article import fetch_article
 from .parsers.channel import list_channel_articles, list_channels, resolve_channel
 from .parsers.search import search_caixin
@@ -352,6 +353,46 @@ def channel(
     finally:
         _cleanup(client, renderer)
     console.print(f"\n[green]完成[/green] 成功 {ok} / 失败 {fail}  ->  {out_dir}")
+
+
+@app.command()
+def login(
+    ctx: typer.Context,
+    timeout: int = typer.Option(180, "--timeout", help="扫码等待超时（秒）。"),
+    print_cookie: bool = typer.Option(False, "--print", help="仅打印 Cookie 不写文件。"),
+):
+    """扫码登录财新，自动提取 Cookie 写入配置（用财新 App 扫码）。"""
+    console.print("[cyan]启动浏览器…[/cyan] 请在弹出的窗口用「财新 App」扫码并确认登录。")
+    try:
+        cookie, info = login_with_qrcode(timeout=timeout, headless=False)
+    except LoginError as e:
+        console.print(f"[red]登录失败：{e}[/red]")
+        raise typer.Exit(1)
+
+    uid = info.get("uid") or info.get("userId") or ""
+    nick = info.get("nickname") or info.get("nickName") or ""
+    bits = []
+    if uid:
+        bits.append(f"uid={uid}")
+    if nick:
+        bits.append(f"昵称={nick}")
+    info_line = "  ".join(bits) if bits else "(无用户信息)"
+    console.print(f"[green]✓ 登录成功[/green] {info_line}")
+
+    if print_cookie:
+        console.print("[dim]Cookie:[/dim]")
+        console.print(cookie)
+        return
+
+    try:
+        save_cookie_to_config(DEFAULT_CONFIG_FILE, cookie)
+    except Exception as e:
+        console.print(f"[red]写入配置失败：{e}[/red]")
+        console.print("[dim]Cookie（请手动保存）：[/dim]")
+        console.print(cookie)
+        raise typer.Exit(1)
+    console.print(f"[green]✓ Cookie 已写入[/green] {DEFAULT_CONFIG_FILE}")
+    console.print("[dim]验证：caixin weekly-list[/dim]")
 
 
 # -- helpers ------------------------------------------------------------------
