@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import time
 
+import httpx
+
 from .config import DEFAULT_USER_AGENT
 
 try:
@@ -29,13 +31,44 @@ except Exception:  # pragma: no cover
     sync_playwright = None  # type: ignore
 
 LOGIN_URL = "https://u.caixin.com/web/"
-# The page calls this (with cookies) right after a successful login.
+# The page calls this (with cookies) right after a successful login. It is also
+# the cheapest way to validate an externally-supplied cookie: ``code:0`` means
+# the session is alive and carries user info; ``code:601`` means logged-out.
+_USERINFO_URL = "https://gateway.caixin.com/api/ucenter/userinfo/get"
 _USERINFO_HINT = "api/ucenter/userinfo/get"
 _COOKIE_DOMAIN = "caixin.com"
 
 
 class LoginError(Exception):
     """Raised when QR-code login fails or times out."""
+
+
+def verify_cookie(cookie: str, user_agent: str = DEFAULT_USER_AGENT, timeout: float = 15.0):
+    """Validate a ``k=v; k=v`` cookie string against Caixin.
+
+    Returns the ``data`` dict (uid/nickname/...) when the session is alive
+    (``code:0``), or ``None`` when the cookie is missing/invalid/expired.
+    """
+    cookie = (cookie or "").strip()
+    if not cookie:
+        return None
+    try:
+        r = httpx.get(
+            _USERINFO_URL,
+            headers={
+                "User-Agent": user_agent,
+                "Cookie": cookie,
+                "Referer": "https://www.caixin.com/",
+                "Origin": "https://www.caixin.com",
+            },
+            timeout=timeout,
+        )
+        obj = r.json()
+    except Exception:
+        return None
+    if isinstance(obj, dict) and obj.get("code") == 0:
+        return obj.get("data") or {}
+    return None
 
 
 def _launch(pw, headless: bool):

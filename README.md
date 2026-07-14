@@ -19,7 +19,7 @@
 - `caixin search <关键词>` - 搜索财新文章（经搜狗 `site:caixin.com`）；`--fetch` 搜到即下载
 - `caixin channel <频道>` - 列出/抓取某频道（板块）最新文章（经济/金融/公司/政经/世界/观点/科技/…）
   子域频道（经济/金融/政经…）支持 AJAX 翻页，可加载更多历史文章（上限约 1000 篇）；路径型频道与首页仅取首页文章。
-- `caixin login` - 扫码登录（财新 App），自动提取 Cookie 写入配置；Cookie 失效后重跑一次即可
+- `caixin login` - 登录并写入 Cookie：交互菜单选「扫码（财新 App）」或「粘贴 Cookie」；Cookie 失效后重跑一次即可
 - 付费全文经 **登录 Cookie + 无头浏览器（Edge/Chrome）** 渲染获取
 - 输出 Markdown：YAML 元信息 + 正文 + 本地下载的配图
 
@@ -43,17 +43,24 @@ python -m playwright install chromium
 
 财新正文需登录态。把你的登录 Cookie 存到配置文件，之后所有命令自动带上。两种方式：
 
-### 方式一：扫码登录（推荐）
+### 方式一：`caixin login`（推荐）
 
 ```bash
 caixin login
 ```
 
-弹出浏览器到财新登录页，用**财新 App**（「我的」→ 右上角扫一扫）扫码并确认，CLI 自动提取 Cookie 写入 `~/.caixin/config.toml`。Cookie 失效后重跑一次即可。
+交互菜单二选一：
 
-> 需本机装 Edge/Chrome 与 Playwright（`pip install playwright`）；登录用的是财新自家 App 扫码，不是微信。云端无图形界面时，在本地登录后把 `~/.caixin/config.toml` 拷过去（见 `docs/RSS.md` 维护章节）。
+1. **扫码（财新 App）**：弹出浏览器到财新登录页，用**财新 App** 扫码并确认，CLI 自动提取 Cookie 写入 `~/.caixin/config.toml`。
+2. **粘贴 Cookie**：把整段 `Cookie:` 头（`k=v; k=v`）粘进来，CLI 先调财新接口校验登录态，通过后才写入配置；无效会提示并不写入。
 
-### 方式二：手动复制
+两种方式都会即时校验 Cookie。Cookie 失效后重跑一次即可。
+
+> 扫码需本机装 Edge/Chrome 与 Playwright（`pip install playwright`），且登录用的是财新自家 App 扫码，不是微信。也可 `caixin login --method scan|cookie` 跳过菜单（便于脚本化），或 `--print` 只打印不写文件。
+
+### 方式二：手动写入配置文件
+
+云端无图形界面时，先在本地 `caixin login` 拿到 Cookie，再把 `~/.caixin/config.toml` 拷过去；或直接手动编辑：
 
 1. 浏览器登录 [caixin.com](https://www.caixin.com/)，打开任意付费文章 -> `F12` -> Network -> 刷新 -> 找一条请求 -> 复制请求头里整行 `Cookie:` 的值（不要 `Cookie:` 这个词本身）。
 2. 存到 `~/.caixin/config.toml`：

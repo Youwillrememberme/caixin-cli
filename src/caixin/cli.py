@@ -8,9 +8,10 @@ from typing import Optional
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import Prompt
 from rich.table import Table
 
-from .auth import LoginError, login_with_qrcode
+from .auth import LoginError, login_with_qrcode, verify_cookie
 from .browser import BrowserRenderer
 from .client import CaixinClient, CaixinError
 from .config import DEFAULT_CONFIG_FILE, Settings, load_settings, save_cookie_to_config
@@ -360,15 +361,51 @@ def login(
     ctx: typer.Context,
     timeout: int = typer.Option(180, "--timeout", help="扫码等待超时（秒）。"),
     print_cookie: bool = typer.Option(False, "--print", help="仅打印 Cookie 不写文件。"),
+    method: Optional[str] = typer.Option(
+        None, "--method", help="登录方式：scan（扫码）/ cookie（粘贴）；不指定则交互选择。",
+    ),
 ):
-    """扫码登录财新，自动提取 Cookie 写入配置（用财新 App 扫码）。"""
-    console.print("[cyan]启动浏览器…[/cyan] 请在弹出的窗口用「财新 App」扫码并确认登录。")
-    try:
-        cookie, info = login_with_qrcode(timeout=timeout, headless=False)
-    except LoginError as e:
-        console.print(f"[red]登录失败：{e}[/red]")
-        raise typer.Exit(1)
+    """登录财新并写入 Cookie：扫码（财新 App）或粘贴 Cookie。"""
+    settings: Settings = ctx.obj
+    m = (method or "").strip().lower()
 
+    if m not in ("scan", "cookie"):
+        console.print("[cyan]登录方式：[/cyan]")
+        console.print("  1) 扫码（财新 App）")
+        console.print("  2) 粘贴 Cookie")
+        choice = Prompt.ask("请选择", choices=["1", "2"], default="1")
+        m = "scan" if choice == "1" else "cookie"
+
+    if m == "scan":
+        console.print("[cyan]启动浏览器…[/cyan] 请在弹出的窗口用「财新 App」扫码并确认登录。")
+        try:
+            cookie, info = login_with_qrcode(timeout=timeout, headless=False)
+        except LoginError as e:
+            console.print(f"[red]登录失败：{e}[/red]")
+            raise typer.Exit(1)
+        _finalize_login(cookie, info, print_cookie)
+        return
+
+    # method == "cookie": paste a raw Cookie header string
+    raw = Prompt.ask("请粘贴 Cookie（整行 k=v; k=v）")
+    cookie = raw.strip()
+    if cookie.lower().startswith("cookie:"):
+        cookie = cookie[len("cookie:"):].strip()
+    if not cookie:
+        console.print("[red]Cookie 为空。[/red]")
+        raise typer.Exit(1)
+    console.print("[dim]校验 Cookie…[/dim]")
+    info = verify_cookie(cookie, settings.user_agent)
+    if info is None:
+        console.print(
+            "[red]Cookie 无效或已失效（接口未返回登录态）。请重新获取整段 Cookie 后再试。[/red]"
+        )
+        raise typer.Exit(1)
+    _finalize_login(cookie, info, print_cookie)
+
+
+def _finalize_login(cookie: str, info: dict, print_cookie: bool) -> None:
+    """Show user info, then save (or print) the freshly obtained cookie."""
     uid = info.get("uid") or info.get("userId") or ""
     nick = info.get("nickname") or info.get("nickName") or ""
     bits = []
@@ -377,13 +414,12 @@ def login(
     if nick:
         bits.append(f"昵称={nick}")
     info_line = "  ".join(bits) if bits else "(无用户信息)"
-    console.print(f"[green]✓ 登录成功[/green] {info_line}")
+    console.print(f"[green]✓ 登录有效[/green] {info_line}")
 
     if print_cookie:
         console.print("[dim]Cookie:[/dim]")
         console.print(cookie)
         return
-
     try:
         save_cookie_to_config(DEFAULT_CONFIG_FILE, cookie)
     except Exception as e:
