@@ -30,7 +30,8 @@ except Exception:  # pragma: no cover
 _NOISE = (
     ".aitt, .bd_block, .chargeWall, #chargeWall, #content_msg, .pip_none, "
     "#pageBtn, #loadinWall, script, style, iframe, noscript, .qr_code, .qrcode, "
-    ".wx-share, .share, .relate-reading, .xgydBox"
+    ".wx-share, .share, .relate-reading, .xgydBox, "
+    "#cxLogoHead, img[src*='editorIcon'], img[src*='favicon']"
 )
 
 
@@ -84,31 +85,34 @@ class BrowserRenderer:
             self._ctx.add_cookies(cookies)
 
     def _wait_settled(self, page, timeout: float) -> None:
-        """Wait for the content JS to finish: body grows past the teaser, the
-        paywall (chargeWall) appears, or timeout. Fast for both long and short
-        accessible articles and for paywalled ones.
+        """Wait for the signed body fetch to finish: #Main_Content_Val grows
+        past the ~318-char teaser into the full text.
+
+        chargeWall flashes during load *even for accessible articles* (the
+        auth JS hides it only after authorizing), so it can't be the settle
+        signal -- returning on it races the body injection and yields the
+        teaser. Only the body actually growing indicates done. Times out for
+        paywalled content (body stays short) or genuinely short free articles.
         """
         try:
             page.wait_for_function(
                 "() => {"
-                "  const cw = document.querySelector('#chargeWall');"
                 "  const mc = document.querySelector('#Main_Content_Val');"
-                "  const bodyLen = mc ? mc.innerText.replace(/\\s+/g,'').length : 0;"
-                "  const cwShown = cw && cw.offsetHeight > 5;"
-                "  return cwShown || bodyLen > 800;"
+                "  return mc && mc.innerText.replace(/\\s+/g,'').length > 800;"
                 "}", timeout=timeout)
         except PWTimeout:
             pass
 
     def _is_paywalled(self, page) -> bool:
-        """chargeWall is the page's own paywall prompt: zero-height/empty when
-        accessible, populated (height>0 or with subscribe text) when paywalled.
-        """
+        """Accessible once the body grew past the teaser; paywalled only when
+        the body stayed short AND chargeWall is still showing."""
         return page.evaluate("""() => {
             const cw = document.querySelector('#chargeWall');
-            if (!cw) return false;
-            const txt = cw.innerText.replace(/\\s+/g, '');
-            return cw.offsetHeight > 5 || txt.length > 0;
+            const mc = document.querySelector('#Main_Content_Val');
+            const bodyLen = mc ? mc.innerText.replace(/\\s+/g,'').length : 0;
+            const cwShown = cw && (cw.offsetHeight > 5
+                || (cw.innerText||'').replace(/\\s+/g,'').length > 0);
+            return bodyLen < 800 && !!cwShown;
         }""")
 
     def _extract(self, page) -> str:
@@ -121,7 +125,7 @@ class BrowserRenderer:
         page = self._ctx.new_page()
         try:
             page.goto(url, timeout=60000, wait_until="domcontentloaded")
-            self._wait_settled(page, timeout=8000)
+            self._wait_settled(page, timeout=10000)
             time.sleep(0.6)
             paywalled = self._is_paywalled(page)
             # discover pagination (?p1..?pN)
@@ -133,7 +137,7 @@ class BrowserRenderer:
                 if n <= 1:  # page 1 == base url already extracted
                     continue
                 page.goto(f"{url}?p{n}", timeout=60000, wait_until="domcontentloaded")
-                self._wait_settled(page, timeout=6000)
+                self._wait_settled(page, timeout=8000)
                 time.sleep(0.3)
                 parts.append(self._extract(page))
             return "".join(parts), total, paywalled

@@ -19,6 +19,7 @@ _NOISE_SELECTORS = [
     ".aitt", ".pip_none", "#pageBtn",
     ".relate-reading", ".xgydBox", ".recommend", ".tuijian",
     ".qr_code", ".qrcode", ".wx-share", ".share",
+    "#cxLogoHead", 'img[src*="editorIcon"]', 'img[src*="favicon"]',
 ]
 
 
@@ -70,7 +71,17 @@ def parse_meta(html: str, url: str) -> dict:
         meta["authors"] = [m.group(0).strip()] if m else []
 
     meta["lead"] = og("description") or meta_name("description")
-    meta["cover_image"] = og("image")
+    # Cover image: prefer the page's high-res lead image (the lazy-loaded
+    # cx-img-loader in the #conTit header carries the full-size URL in
+    # data-src, e.g. ..._840_560.jpg vs og:image's ..._560_373.jpg); fall
+    # back to og:image.
+    hero = (soup.select_one("#conTit img[data-src]")
+            or soup.select_one("img.cx-img-loader[data-src]"))
+    cover = (hero.get("data-src") or "").strip() if hero else ""
+    cover = cover or og("image")
+    if cover.startswith("//"):
+        cover = "https:" + cover
+    meta["cover_image"] = cover
 
     # Issue reference: 来源于《财新周刊》2026年07月13日第27期
     meta["issue"] = _parse_issue_ref(html)

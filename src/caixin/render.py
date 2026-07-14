@@ -97,6 +97,80 @@ def download_images(
     return soup.decode_contents(), failed
 
 
+def _local_name(src: str) -> str:
+    path = uparse.urlparse(src).path
+    name = Path(path).name or "image"
+    name = re.sub(r"[^\w.\-]+", "_", name)[:120]
+    if not Path(name).suffix:
+        name += ".jpg"
+    return name
+
+
+def download_one_image(
+    src: str, images_dir: Path, client: Optional[CaixinClient], base_url: str = ""
+) -> Optional[str]:
+    """Download a single image URL into images_dir.
+
+    Returns the local reference ``images/<name>`` on success, or ``None`` on
+    failure (caller then falls back to the remote URL). Used for the cover
+    image so it lands in the offline archive alongside body images.
+    """
+    s = src.strip()
+    if s.startswith("//"):
+        s = "https:" + s
+    elif s.startswith("/"):
+        s = uparse.urljoin(base_url or "https://www.caixin.com/", s)
+    if not s.startswith(("http://", "https://")):
+        return None
+    images_dir.mkdir(parents=True, exist_ok=True)
+    name = _local_name(s)
+    dest = images_dir / name
+    if client is not None and not dest.exists():
+        try:
+            client._throttle()
+            r = client._client.get(s, headers={"Referer": base_url or "https://www.caixin.com/"})
+            if r.status_code == 200 and r.content:
+                dest.write_bytes(r.content)
+            else:
+                return None
+        except Exception:
+            return None
+    return f"images/{name}" if dest.exists() else None
+
+
+def preprocess_body_html(body_html: str) -> str:
+    """Normalize a Caixin article body for clean Markdown.
+
+    Photo essays (显影/视线) wrap each photo as
+    ``<div class="imageBoxG"><img class="articleImageB" ...><div class="imageText">caption</div></div>``.
+    Without intervention the caption renders as a loose paragraph that reads
+    like body text. Here we fold the caption into the ``<img>`` alt *and* wrap
+    it in ``<em>`` so it renders as an italic line directly under the photo.
+
+    Also promotes protocol-relative (``//host``) image URLs to ``https:`` so the
+    image markdown is valid even when images aren't downloaded (``--stdout``).
+    """
+    if not body_html:
+        return ""
+    soup = BeautifulSoup(body_html, "lxml")
+    for box in soup.select(".imageBoxG"):
+        img = box.find("img")
+        cap = box.select_one(".imageText")
+        if img and cap:
+            text = cap.get_text(" ", strip=True)
+            if text:
+                img["alt"] = text
+                cap.clear()
+                em = soup.new_tag("em")
+                em.string = text
+                cap.append(em)
+    for img in soup.find_all("img"):
+        src = img.get("src", "")
+        if src.startswith("//"):
+            img["src"] = "https:" + src
+    return soup.decode_contents()
+
+
 def body_to_markdown(body_html: str) -> str:
     """Convert article body HTML to Markdown."""
     md_text = md(
@@ -106,7 +180,8 @@ def body_to_markdown(body_html: str) -> str:
         strip=["script", "style", "iframe", "form", "button"],
         default_title=True,
     )
-    # tidy excessive blank lines
+    # blank out whitespace-only lines, then tidy excessive blank lines
+    md_text = re.sub(r"(?m)^[ \t]+$", "", md_text)
     md_text = re.sub(r"\n{3,}", "\n\n", md_text).strip()
     return md_text
 
@@ -123,6 +198,7 @@ def render_markdown(
     ``out_dir/images`` and referenced as relative ``images/<name>`` paths.
     """
     body_html = article.body_html or ""
+    body_html = preprocess_body_html(body_html)
 
     if download_imgs and body_html and out_dir is not None:
         images_dir = out_dir / "images"
@@ -165,9 +241,17 @@ def render_markdown(
         )
         parts.append("")
 
-    # cover image (og:image)
-    if article.cover_image and download_imgs:
-        parts.append(f"![]({article.cover_image})")
+    # cover image: download locally (like body images) so the offline archive
+    # has it; fall back to the remote URL. Shown for --stdout (remote) too;
+    # only --no-images (download_imgs=False with an out_dir) skips it.
+    cover = article.cover_image
+    if cover and (download_imgs or out_dir is None):
+        if download_imgs and out_dir is not None:
+            local = download_one_image(cover, out_dir / "images", client, article.url)
+            cover_ref = local or cover
+        else:
+            cover_ref = cover
+        parts.append(f"![]({cover_ref})")
         parts.append("")
 
     # body
