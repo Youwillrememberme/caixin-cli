@@ -6,11 +6,26 @@ import urllib.parse as uparse
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 
 from .client import CaixinClient, CaixinError
 from .models import Article
+
+
+def _get_image(client: CaixinClient, src: str, referer: str) -> httpx.Response:
+    """GET an image with a fresh, cookie-free request.
+
+    Article bodies can embed images from arbitrary hosts, so the shared
+    ``client._client`` (which carries the login cookie) must not be used here.
+    """
+    return httpx.get(
+        src,
+        headers={"User-Agent": client.settings.user_agent, "Referer": referer},
+        follow_redirects=True,
+        timeout=httpx.Timeout(30.0, connect=10.0),
+    )
 
 
 def yaml_escape(s: str) -> str:
@@ -79,7 +94,7 @@ def download_images(
         if client is not None and not dest.exists():
             try:
                 client._throttle()
-                r = client._client.get(src, headers={"Referer": base_url or "https://www.caixin.com/"})
+                r = _get_image(client, src, base_url or "https://www.caixin.com/")
                 if r.status_code == 200 and r.content:
                     dest.write_bytes(r.content)
                 else:
@@ -128,7 +143,7 @@ def download_one_image(
     if client is not None and not dest.exists():
         try:
             client._throttle()
-            r = client._client.get(s, headers={"Referer": base_url or "https://www.caixin.com/"})
+            r = _get_image(client, s, base_url or "https://www.caixin.com/")
             if r.status_code == 200 and r.content:
                 dest.write_bytes(r.content)
             else:

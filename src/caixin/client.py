@@ -17,10 +17,23 @@ from typing import Optional
 import httpx
 
 from .config import Settings, cookie_jar_from_header
+from .utils import is_caixin_url
 
 
 class CaixinError(Exception):
     """Base error for client failures."""
+
+
+def _only_caixin(request: httpx.Request) -> None:
+    """Request hook: refuse any request (or redirect hop) outside *.caixin.com.
+
+    The shared client sends the login cookie on every request, so it must never
+    talk to a third-party host. Non-Caixin fetches (search engine, embedded
+    images) use their own cookie-free ``httpx`` requests instead.
+    """
+    if not is_caixin_url(str(request.url)):
+        raise CaixinError(
+            f"refusing to send the Caixin cookie to non-Caixin host: {request.url.host}")
 
 
 class CaixinClient:
@@ -40,6 +53,7 @@ class CaixinClient:
             headers=headers,
             follow_redirects=True,
             timeout=httpx.Timeout(30.0, connect=10.0),
+            event_hooks={"request": [_only_caixin]},
         )
         self._last_request = 0.0
 

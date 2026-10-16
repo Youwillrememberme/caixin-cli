@@ -16,6 +16,7 @@ import re
 from typing import Optional
 from urllib.parse import quote_plus, urlparse
 
+import httpx
 from bs4 import BeautifulSoup
 
 from ..client import CaixinClient, CaixinError
@@ -55,15 +56,25 @@ def search_caixin(client: CaixinClient, query: str, limit: int = 20) -> list[Sea
 
 
 def _fetch(client: CaixinClient, url: str, params: dict) -> str:
-    """GET a search-engine page via the client's session."""
-    r = client._client.get(
-        url,
-        params=params,
-        headers={
-            "Referer": "https://www.sogou.com/",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        },
-    )
+    """GET a search-engine page with a fresh, cookie-free request.
+
+    Deliberately not ``client._client``: that session carries the Caixin login
+    cookie, which must never be sent to a third-party host like Sogou.
+    """
+    try:
+        r = httpx.get(
+            url,
+            params=params,
+            headers={
+                "User-Agent": client.settings.user_agent,
+                "Referer": "https://www.sogou.com/",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            },
+            follow_redirects=True,
+            timeout=httpx.Timeout(30.0, connect=10.0),
+        )
+    except httpx.HTTPError as e:
+        raise CaixinError(f"search engine request failed: {e}") from e
     if r.status_code >= 400:
         raise CaixinError(f"search engine HTTP {r.status_code}")
     return r.content.decode("utf-8", errors="replace")
